@@ -23,10 +23,10 @@ CRITICAL RULES FOR QUALITY:
 
 2. EVERY CLAIM NEEDS A QUALITY SIGNAL
    Label each significant claim:
-   [Established] — supported by multiple independent sources
-   [Emerging] — supported by recent but limited evidence
-   [Contested] — actively debated with credible voices on both sides
-   [Speculative] — extrapolated, not yet evidenced
+    [Confirmed] — supported by multiple independent sources
+    [Emerging] — supported by recent but limited evidence
+    [Debated] — actively debated with credible voices on both sides
+    [Unclear] — extrapolated, not yet evidenced
 
 3. NUMBERS NEED CONTEXT
    Bad: "The market is worth USD 4.2 billion."
@@ -76,12 +76,12 @@ Write 3-4 paragraphs. Every paragraph must have at least 1 evidence-tagged claim
 ## 2. Current Landscape
 
 What is the present state of this topic? Cover:
-- What is known with confidence [Established] (cite sources)
+- What is known with confidence [Confirmed] (cite sources)
 - What is actively developing or changing [Emerging]
 - Key players, technologies, policies, or trends
 - Recent developments with dates where possible
 Write 4-5 paragraphs. Every paragraph must have at least 1 evidence-tagged claim.
-Use ALL FOUR tags across this section: [Established], [Emerging], [Contested], [Speculative].
+Use ALL FOUR tags across this section: [Confirmed], [Emerging], [Debated], [Unclear].
 
 ## 3. Key Developments and Trends
 
@@ -89,20 +89,20 @@ What are the most significant recent developments?
 What direction is this heading? Cover:
 - Major breakthroughs or shifts
 - Emerging patterns and where they point
-- Differing viewpoints and why they exist [Contested]
+- Differing viewpoints and why they exist [Debated]
 Write 3-4 paragraphs. Every paragraph must have at least 1 evidence-tagged claim.
 
 ## 4. Challenges and Considerations
 
 What problems, limitations, or debates exist?
 What should the reader be cautious about?
-Write 2-3 paragraphs. Tag each debate with [Contested].
+Write 2-3 paragraphs. Tag each debate with [Debated].
 
 ## 5. Future Outlook
 
 Where is this headed? What comes next?
 What are the implications — for whom, on what timeline?
-Write 2-3 paragraphs. Tag forward-looking claims with [Emerging] or [Speculative].
+Write 2-3 paragraphs. Tag forward-looking claims with [Emerging] or [Unclear].
 
 ## Sources
 - [Publication](url) — one sentence on what this source contributed
@@ -122,9 +122,9 @@ If broadly consistent: "Sources are broadly consistent on this topic."
 - Question three?
 
 CRITICAL RULES:
-- ALWAYS tag every significant claim with [Established], [Emerging], [Contested], or [Speculative]
+- ALWAYS tag every significant claim with [Confirmed], [Emerging], [Debated], or [Unclear]
 - The tags are what make this report valuable — do not skip them
-- Place tags inline right after the claim: "Remote work boosts productivity by 13% [Established] — [Source](url)"
+- Place tags inline right after the claim: "Remote work boosts productivity by 13% [Confirmed] — [Source](url)"
 - Every section must flow naturally into the next
 - Write USD not $. Avoid special characters that break markdown.
 - Every factual claim needs a markdown link: [Source](url)
@@ -242,7 +242,7 @@ One sentence verdict: how do these compare and for whom?
 2-3 sentences. Identify any category errors.
 
 ## The Evidence on [Topic A]
-3-4 sentences with sources. Label claims [Established]/[Contested]/[Emerging].
+3-4 sentences with sources. Label claims [Confirmed]/[Debated]/[Emerging].
 
 ## The Evidence on [Topic B]
 Same structure.
