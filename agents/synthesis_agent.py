@@ -102,7 +102,8 @@ What are the implications — for whom, on what timeline?
 Write 2-3 paragraphs.
 
 ## Sources
-- [Source Name](url) — [Confirmed/Emerging/Debated/Unclear] — one sentence on contribution
+- [Source Name](url)
+  [Confirmed/Emerging/Debated/Unclear] — one sentence on contribution
 
 ## Contested Claims
 If sources disagree substantially:
@@ -164,7 +165,8 @@ One paragraph — is the core argument sound?
 What should the reader take away, and what should they read next?
 
 ## Sources
-- [Source Name](url) — [Confirmed/Emerging/Debated/Unclear] — contribution and limitations
+- [Source Name](url)
+  [Confirmed/Emerging/Debated/Unclear] — contribution and limitations
 
 ## Contested Claims
 If sources disagree:
@@ -226,7 +228,8 @@ Where should the reader seek more current sources?
 One paragraph.
 
 ## Sources
-- [Source Name](url) — [Confirmed/Emerging/Debated/Unclear] — contribution and limitations
+- [Source Name](url)
+  [Confirmed/Emerging/Debated/Unclear] — contribution and limitations
 
 ## Contested Claims
 If sources disagree:
@@ -288,7 +291,8 @@ What future developments could change the answer?
 Write 1-2 paragraphs.
 
 ## Sources
-- [Source Name](url) — [Confirmed/Emerging/Debated/Unclear] — contribution
+- [Source Name](url)
+  [Confirmed/Emerging/Debated/Unclear] — contribution
 
 ## Contested Claims
 If sources disagree:
