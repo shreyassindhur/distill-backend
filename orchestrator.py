@@ -55,16 +55,27 @@ def run_url_research(url: str, tone: str = "default") -> dict:
     url_content = read_url(url)
     if "error" in url_content:
         raise Exception(f"Could not read URL: {url_content['error']}")
+
+    # Fetch supporting web sources for cross-reference
+    topic_for_search = url_content.get("title", "") or url
+    supporting = run_search_agent(topic_for_search[:200], depth="quick")
+    clean_supporting = [
+        r for r in supporting
+        if "error" not in r and r.get("content", "").strip()
+    ]
+
     combined = [{
         "title": "SOURCE ARTICLE",
         "url": url,
         "content": url_content["content"][:4000]
-    }]
+    }] + clean_supporting[:6]
+
+    total = len(combined)
     raw = run_synthesis_agent(f"Article Analysis: {url}", combined, mode="url", tone=tone)
     report, followups, contested = parse_followups(raw)
     return {
         "topic": f"URL: {url[:60]}",
-        "sources_found": 1,
+        "sources_found": total,
         "report": report,
         "followups": followups,
         "contested": contested,
@@ -82,16 +93,26 @@ def run_pdf_research(uploaded_file, tone: str = "default") -> dict:
     pdf_content = read_pdf(uploaded_file)
     if "error" in pdf_content:
         raise Exception(f"Could not read PDF: {pdf_content['error']}")
+
+    # Fetch supporting web sources for context
+    supporting = run_search_agent(pdf_content["content"][:200], depth="quick")
+    clean_supporting = [
+        r for r in supporting
+        if "error" not in r and r.get("content", "").strip()
+    ]
+
     combined = [{
         "title": f"Uploaded PDF: {file_name}",
         "url": "Uploaded document",
         "content": pdf_content["content"][:4000]
-    }]
+    }] + clean_supporting[:6]
+
+    total = len(combined)
     raw = run_synthesis_agent(f"Analysis of: {file_name}", combined, mode="pdf", tone=tone)
     report, followups, contested = parse_followups(raw)
     return {
         "topic": f"PDF: {file_name[:40]}",
-        "sources_found": 1,
+        "sources_found": total,
         "report": report,
         "followups": followups,
         "contested": contested,
@@ -102,6 +123,7 @@ def run_pdf_research(uploaded_file, tone: str = "default") -> dict:
 def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dict:
     combined = []
     source_label = ""
+    search_query = ""
 
     if url and url.startswith("http"):
         from tools.url_reader import read_url
@@ -111,6 +133,7 @@ def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dic
             raise Exception(f"Could not read URL: {content['error']}")
         combined.append({"title": "SOURCE ARTICLE", "url": url, "content": content["content"][:4000]})
         source_label = url[:60]
+        search_query = content.get("title", "") or url
 
     if uploaded_file:
         from tools.pdf_reader import read_pdf
@@ -122,9 +145,21 @@ def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dic
         combined.append({"title": f"Uploaded PDF: {file_name}", "url": "Uploaded document", "content": content["content"][:4000]})
         if not source_label:
             source_label = f"PDF: {file_name[:40]}"
+            search_query = content["content"][:200]
+        else:
+            search_query = content.get("title", f"{file_name} {content['content'][:100]}")
 
     if not combined:
         raise Exception("Provide a URL or upload a file to analyze.")
+
+    # Fetch supporting web sources for cross-reference
+    if search_query:
+        supporting = run_search_agent(search_query[:200], depth="quick")
+        clean_supporting = [
+            r for r in supporting
+            if "error" not in r and r.get("content", "").strip()
+        ]
+        combined += clean_supporting[:6]
 
     label = f"Analysis: {source_label}"
     raw = run_synthesis_agent(label, combined, mode="url", tone=tone)
