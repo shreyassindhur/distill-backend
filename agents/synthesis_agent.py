@@ -59,28 +59,29 @@ The report must tell a coherent story from beginning to end.
 
 """ + REASONING_INSTRUCTION + """
 
-Use EXACTLY this structure:
+Use EXACTLY this structure. Tag EVERY significant claim with an evidence tag:
 
 # [Topic Title — clear and specific]
 
 **Overview:** 2-3 sentences. What is this topic about and why does it matter now?
-State the most important takeaway first.
+State the most important takeaway first. Include 1 evidence tag here.
 
 ## 1. Background and Context
 
 Start from the beginning. What is the origin or foundation of this topic?
 What key concepts does the reader need to understand first?
 What historical developments led to the current situation?
-Write 3-4 paragraphs that build from first principles.
+Write 3-4 paragraphs. Every paragraph must have at least 1 evidence-tagged claim.
 
 ## 2. Current Landscape
 
 What is the present state of this topic? Cover:
-- What is known with confidence (cite sources)
-- What is actively developing or changing
+- What is known with confidence [Established] (cite sources)
+- What is actively developing or changing [Emerging]
 - Key players, technologies, policies, or trends
 - Recent developments with dates where possible
-Write 4-5 paragraphs flowing naturally from background to present.
+Write 4-5 paragraphs. Every paragraph must have at least 1 evidence-tagged claim.
+Use ALL FOUR tags across this section: [Established], [Emerging], [Contested], [Speculative].
 
 ## 3. Key Developments and Trends
 
@@ -88,20 +89,20 @@ What are the most significant recent developments?
 What direction is this heading? Cover:
 - Major breakthroughs or shifts
 - Emerging patterns and where they point
-- Differing viewpoints and why they exist
-Write 3-4 paragraphs. Use evidence tags naturally in context.
+- Differing viewpoints and why they exist [Contested]
+Write 3-4 paragraphs. Every paragraph must have at least 1 evidence-tagged claim.
 
 ## 4. Challenges and Considerations
 
 What problems, limitations, or debates exist?
 What should the reader be cautious about?
-Write 2-3 paragraphs.
+Write 2-3 paragraphs. Tag each debate with [Contested].
 
 ## 5. Future Outlook
 
 Where is this headed? What comes next?
 What are the implications — for whom, on what timeline?
-Write 2-3 paragraphs.
+Write 2-3 paragraphs. Tag forward-looking claims with [Emerging] or [Speculative].
 
 ## Sources
 - [Publication](url) — one sentence on what this source contributed
@@ -120,9 +121,11 @@ If broadly consistent: "Sources are broadly consistent on this topic."
 - Question two?
 - Question three?
 
-IMPORTANT RULES:
+CRITICAL RULES:
+- ALWAYS tag every significant claim with [Established], [Emerging], [Contested], or [Speculative]
+- The tags are what make this report valuable — do not skip them
+- Place tags inline right after the claim: "Remote work boosts productivity by 13% [Established] — [Source](url)"
 - Every section must flow naturally into the next
-- Use evidence tags ([Established], [Emerging], [Contested], [Speculative]) where they help, but don't force them into every sentence
 - Write USD not $. Avoid special characters that break markdown.
 - Every factual claim needs a markdown link: [Source](url)
 - Never use filler phrases like "It is worth noting", "In conclusion", "To summarize"
