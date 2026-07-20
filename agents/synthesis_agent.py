@@ -1,8 +1,18 @@
 import os
+import re
+from urllib.parse import urlparse
 from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
+
+def _site_name(url: str) -> str:
+    """Extract a readable source name from a URL."""
+    try:
+        domain = urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+    return re.sub(r'^www\.', '', domain)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -549,8 +559,9 @@ def run_synthesis_agent(
         formatted_results += "\n=== WEB SOURCES ===\n\n"
         for i, r in enumerate(web, 1):
             if "error" not in r:
-                title = r.get('title', '').strip()
-                label = title[:80] if title else r.get('url', f'Source {i}')[:60]
+                url = r.get('url', '')
+                site = _site_name(url) if url else ""
+                label = site[:60] if site else f'Source {i}'
                 formatted_results += f"[{label}]\n"
                 formatted_results += f"URL: {r.get('url', '')}\n"
                 formatted_results += f"Content: {r.get('content', '')}\n"
