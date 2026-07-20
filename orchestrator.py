@@ -99,7 +99,7 @@ def run_url_research(url: str, tone: str = "default") -> dict:
     ]
 
     combined = [{
-        "title": "SOURCE ARTICLE",
+        "title": url_content.get("title", url)[:80],
         "url": url,
         "content": url_content["content"][:4000]
     }] + clean_supporting[:6]
@@ -169,7 +169,7 @@ def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dic
         content = read_url(url)
         if "error" in content:
             raise Exception(f"Could not read URL: {content['error']}")
-        combined.append({"title": "SOURCE ARTICLE", "url": url, "content": content["content"][:4000]})
+        combined.append({"title": content.get("title", url)[:80], "url": url, "content": content["content"][:4000]})
         source_label = url[:60]
         search_query = content.get("title", "") or url
 
