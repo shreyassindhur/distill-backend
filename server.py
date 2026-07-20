@@ -281,27 +281,6 @@ def credits_award(req: AwardRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.post("/credits/activity")
-def credits_activity(req: SessionRequest):
-    try:
-        s = db.log_active_day(req.session_id)
-        if not s: return JSONResponse(status_code=404, content={"error": "session not found"})
-        return s
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-@app.post("/credits/weekly-bonus")
-def credits_weekly(req: SessionRequest):
-    try:
-        s = db.claim_weekly_bonus(req.session_id)
-        if not s: return JSONResponse(status_code=400, content={"error": "not eligible"})
-        return s
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# ── quick answer ──────────────────────────────────────────────────────────────
-
 @app.post("/quick-answer")
 def quick_answer(req: QuickAnswerRequest):
     try:

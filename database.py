@@ -1,5 +1,5 @@
-import sqlite3, os, json
-from datetime import datetime, timedelta
+import sqlite3, os
+from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "distill.db")
 
@@ -20,8 +20,6 @@ def init_db():
             feedback_text TEXT,
             referral_code TEXT NOT NULL,
             referral_count INTEGER NOT NULL DEFAULT 0,
-            active_days TEXT NOT NULL DEFAULT '[]',
-            last_weekly_bonus TEXT,
             last_daily_refill TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -54,7 +52,6 @@ def create_session():
 
 def _row_to_dict(row):
     d = dict(row)
-    d["active_days"] = json.loads(d["active_days"])
     d["balance"] = d["balance"]
     d["feedback_given"] = bool(d["feedback_given"])
     d["referral_count"] = d["referral_count"]
@@ -95,37 +92,6 @@ def add_credits(sid: str, amount: int):
     row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (sid,)).fetchone()
     conn.close()
     return _row_to_dict(row)
-
-def log_active_day(sid: str):
-    conn = _conn()
-    row = conn.execute("SELECT active_days FROM sessions WHERE session_id = ?", (sid,)).fetchone()
-    if not row: conn.close(); return None
-    days = json.loads(row["active_days"])
-    today = datetime.now().date().isoformat()
-    if today not in days:
-        days.append(today)
-        conn.execute("UPDATE sessions SET active_days = ? WHERE session_id = ?", (json.dumps(days), sid))
-        conn.commit()
-    row2 = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (sid,)).fetchone()
-    conn.close()
-    return _row_to_dict(row2)
-
-def claim_weekly_bonus(sid: str, bonus=5):
-    conn = _conn()
-    row = conn.execute("SELECT active_days, last_weekly_bonus, balance FROM sessions WHERE session_id = ?", (sid,)).fetchone()
-    if not row: conn.close(); return None
-    days = json.loads(row["active_days"])
-    if len(days) < 3:
-        conn.close(); return None
-    if row["last_weekly_bonus"]:
-        last = datetime.fromisoformat(row["last_weekly_bonus"])
-        if datetime.now() - last < timedelta(days=7):
-            conn.close(); return None
-    conn.execute("UPDATE sessions SET balance = balance + ?, last_weekly_bonus = ? WHERE session_id = ?", (bonus, datetime.now().isoformat(), sid))
-    conn.commit()
-    row2 = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (sid,)).fetchone()
-    conn.close()
-    return _row_to_dict(row2)
 
 def record_feedback(sid: str, love: str, improve: str, rating: int, text: str):
     conn = _conn()
