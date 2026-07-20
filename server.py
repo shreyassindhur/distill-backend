@@ -237,6 +237,10 @@ def submit_feedback(req: FeedbackRequest):
                 else: run += 1; mx = max(mx, run)
             if mx > 5: return True
             return False
+        if not req.name.strip():
+            return JSONResponse(status_code=400, content={"error": "Name is required"})
+        if not req.email.strip() or "@" not in req.email or "." not in req.email.split("@")[-1]:
+            return JSONResponse(status_code=400, content={"error": "Valid email is required"})
         texts = [t for t in [req.love, req.improve] if t.strip()]
         if texts and all(_gib(t) for t in texts) and not req.rating:
             return JSONResponse(status_code=400, content={"error": "feedback appears to be gibberish"})
