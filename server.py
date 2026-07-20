@@ -69,6 +69,8 @@ class FeedbackRequest(BaseModel):
     love: str = ""
     improve: str = ""
     rating: int = 0
+    name: str = ""
+    email: str = ""
 
 class DeductRequest(BaseModel):
     session_id: str
@@ -239,7 +241,7 @@ def submit_feedback(req: FeedbackRequest):
         if texts and all(_gib(t) for t in texts) and not req.rating:
             return JSONResponse(status_code=400, content={"error": "feedback appears to be gibberish"})
         combined = f"♥ {req.love}\n▲ {req.improve}\n★ {req.rating}/5"
-        db.record_feedback(req.session_id, req.love, req.improve, req.rating, combined)
+        db.record_feedback(req.session_id, req.love, req.improve, req.rating, combined, req.name, req.email)
         s = db.add_credits(req.session_id, 10)
         if not s: return JSONResponse(status_code=404, content={"error": "session not found"})
         return {"ok": True, "credits": s}

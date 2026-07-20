@@ -30,6 +30,8 @@ def init_db():
             improve TEXT DEFAULT '',
             rating INTEGER DEFAULT 0,
             text TEXT DEFAULT '',
+            name TEXT DEFAULT '',
+            email TEXT DEFAULT '',
             timestamp TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
@@ -93,9 +95,9 @@ def add_credits(sid: str, amount: int):
     conn.close()
     return _row_to_dict(row)
 
-def record_feedback(sid: str, love: str, improve: str, rating: int, text: str):
+def record_feedback(sid: str, love: str, improve: str, rating: int, text: str, name: str = "", email: str = ""):
     conn = _conn()
-    conn.execute("INSERT INTO feedback (session_id, love, improve, rating, text) VALUES (?, ?, ?, ?, ?)", (sid, love, improve, rating, text))
+    conn.execute("INSERT INTO feedback (session_id, love, improve, rating, text, name, email) VALUES (?, ?, ?, ?, ?, ?, ?)", (sid, love, improve, rating, text, name, email))
     conn.execute("UPDATE sessions SET feedback_given = 1, feedback_date = datetime('now'), feedback_text = ? WHERE session_id = ?", (text, sid))
     conn.commit()
     conn.close()
