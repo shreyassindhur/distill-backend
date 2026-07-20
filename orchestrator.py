@@ -2,6 +2,21 @@ from agents.search_agent import run_search_agent
 from agents.synthesis_agent import run_synthesis_agent
 
 
+import re
+
+
+def validate_citations(report: str, source_urls: set) -> str:
+    """Remove citations whose URLs don't appear in the actual source list."""
+    def _check(m):
+        text = m.group(1)
+        url = m.group(2).rstrip(")")
+        if url in source_urls:
+            return m.group(0)
+        # URL not in sources — strip the link, keep text
+        return text
+    return re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _check, report)
+
+
 def parse_followups(report: str):
     main_report = report
     questions = []
@@ -37,8 +52,27 @@ def run_research(topic: str, depth: str = "normal", tone: str = "default") -> di
     clean = [r for r in search_results if "error" not in r and r.get("content", "").strip()]
     if len(clean) < 2:
         raise Exception("Couldn't find enough reliable sources. Try a more specific term.")
+
+    # First pass — generate report
     raw = run_synthesis_agent(topic, clean, mode="topic", tone=tone)
+    source_urls = {r.get("url", "") for r in clean if r.get("url")}
+    raw = validate_citations(raw, source_urls)
     report, followups, contested = parse_followups(raw)
+
+    # Second pass — if report is thin, run targeted follow-up queries and regenerate
+    word_count = len(report.split())
+    unclear_count = report.lower().count("unclear") + report.lower().count("limited evidence")
+    if word_count < 600 or unclear_count > 3:
+        print(f"[Distill] Report thin ({word_count} words, {unclear_count} unclear) — running follow-up search")
+        deeper = run_search_agent(f"{topic} statistics data findings 2024 2025", depth="quick")
+        extra = [r for r in deeper if "error" not in r and r.get("content", "").strip() and r.get("url", "") not in source_urls]
+        if extra:
+            clean += extra[:4]
+            source_urls = {r.get("url", "") for r in clean if r.get("url")}
+            raw = run_synthesis_agent(topic, clean, mode="topic", tone=tone)
+            raw = validate_citations(raw, source_urls)
+            report, followups, contested = parse_followups(raw)
+
     return {
         "topic": topic,
         "sources_found": len(clean),
@@ -72,6 +106,8 @@ def run_url_research(url: str, tone: str = "default") -> dict:
 
     total = len(combined)
     raw = run_synthesis_agent(f"Article Analysis: {url}", combined, mode="url", tone=tone)
+    source_urls = {r.get("url", "") for r in combined if r.get("url")}
+    raw = validate_citations(raw, source_urls)
     report, followups, contested = parse_followups(raw)
     return {
         "topic": f"URL: {url[:60]}",
@@ -109,6 +145,8 @@ def run_pdf_research(uploaded_file, tone: str = "default") -> dict:
 
     total = len(combined)
     raw = run_synthesis_agent(f"Analysis of: {file_name}", combined, mode="pdf", tone=tone)
+    source_urls = {r.get("url", "") for r in combined if r.get("url")}
+    raw = validate_citations(raw, source_urls)
     report, followups, contested = parse_followups(raw)
     return {
         "topic": f"PDF: {file_name[:40]}",
@@ -163,6 +201,8 @@ def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dic
 
     label = f"Analysis: {source_label}"
     raw = run_synthesis_agent(label, combined, mode="url", tone=tone)
+    source_urls = {r.get("url", "") for r in combined if r.get("url")}
+    raw = validate_citations(raw, source_urls)
     report, followups, contested = parse_followups(raw)
     return {
         "topic": label,
@@ -188,6 +228,8 @@ def run_comparison_research(topic_a: str, topic_b: str, depth: str = "normal") -
         r["title"] = f"[{topic_b}] {r.get('title', '')}"
     combined = clean_a + clean_b
     raw = run_synthesis_agent(f"{topic_a} vs {topic_b}", combined, mode="comparison")
+    source_urls = {r.get("url", "") for r in combined if r.get("url")}
+    raw = validate_citations(raw, source_urls)
     report, followups, contested = parse_followups(raw)
     return {
         "topic": f"{topic_a} vs {topic_b}",

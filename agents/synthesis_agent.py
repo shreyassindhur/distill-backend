@@ -531,11 +531,11 @@ def run_synthesis_agent(
     # Academic sources first — clearly labeled
     if academic:
         formatted_results += "\n=== PEER-REVIEWED ACADEMIC SOURCES ===\n"
-        formatted_results += "These are real papers from Semantic Scholar with verified metadata.\n"
         formatted_results += "Cite these with author names and years: [Author et al., Year](url)\n\n"
         for i, r in enumerate(academic, 1):
-            formatted_results += f"[Academic Source {i}]\n"
-            formatted_results += f"Title: {r.get('title', 'Unknown')}\n"
+            title = r.get('title', 'Unknown').strip()
+            label = title[:80] if title else f"Paper {i}"
+            formatted_results += f"[{label}]\n"
             formatted_results += f"Authors: {r.get('authors', 'Unknown')}\n"
             formatted_results += f"Year: {r.get('year', 'n.d.')}\n"
             formatted_results += f"Venue: {r.get('venue', 'Unknown')}\n"
@@ -546,12 +546,12 @@ def run_synthesis_agent(
 
     # Web sources second
     if web:
-        formatted_results += "\n=== WEB SOURCES ===\n"
-        formatted_results += "Current web sources for recent context and industry data.\n\n"
+        formatted_results += "\n=== WEB SOURCES ===\n\n"
         for i, r in enumerate(web, 1):
             if "error" not in r:
-                formatted_results += f"[Web Source {i}]\n"
-                formatted_results += f"Title: {r.get('title', 'Unknown')}\n"
+                title = r.get('title', '').strip()
+                label = title[:80] if title else r.get('url', f'Source {i}')[:60]
+                formatted_results += f"[{label}]\n"
                 formatted_results += f"URL: {r.get('url', '')}\n"
                 formatted_results += f"Content: {r.get('content', '')}\n"
                 formatted_results += "---\n"
