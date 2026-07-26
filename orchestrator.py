@@ -1,8 +1,12 @@
+import asyncio
+import re
+
+from agents.base import Agent, ResearchContext
 from agents.search_agent import run_search_agent
 from agents.synthesis_agent import run_synthesis_agent
 
 
-import re
+# ── Utility functions (shared, not agents) ─────────────────────────────────
 
 
 def validate_citations(report: str, source_urls: set) -> str:
@@ -12,7 +16,6 @@ def validate_citations(report: str, source_urls: set) -> str:
         url = m.group(2).rstrip(")")
         if url in source_urls:
             return m.group(0)
-        # URL not in sources — strip the link, keep text
         return text
     return re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _check, report)
 
@@ -46,233 +49,400 @@ def parse_followups(report: str):
     return main_report, questions[:3], contested
 
 
-def run_research(topic: str, depth: str = "normal", tone: str = "default") -> dict:
-    print(f"[Distill] Researching: {topic}")
-    search_results = run_search_agent(topic, depth=depth)
-    clean = [r for r in search_results if "error" not in r and r.get("content", "").strip()]
+# ── Agents ─────────────────────────────────────────────────────────────────
+
+
+class SearchAgent(Agent):
+    """Performs web search for a given query."""
+    def __init__(self, query: str | None = None, depth: str = "normal"):
+        super().__init__("SearchAgent")
+        self._query = query
+        self._depth = depth
+
+    async def run(self, ctx: ResearchContext) -> ResearchContext:
+        query = self._query or ctx.query
+        print(f"[SearchAgent] depth={self._depth}: {query[:80]}")
+        results = await asyncio.to_thread(run_search_agent, query, self._depth)
+        clean = [r for r in results if "error" not in r and r.get("content", "").strip()]
+        ctx.state["search_results"] = clean
+        ctx.sources.extend(clean)
+        ctx.source_urls.update(r.get("url", "") for r in clean if r.get("url"))
+        return ctx
+
+
+class AcademicSearchAgent(Agent):
+    """Performs academic paper search via Semantic Scholar."""
+    def __init__(self, query: str | None = None):
+        super().__init__("AcademicSearchAgent")
+        self._query = query
+
+    async def run(self, ctx: ResearchContext) -> ResearchContext:
+        from tools.semantic_scholar import search_multi_query, format_for_synthesis
+        query = self._query or ctx.query
+        print(f"[AcademicSearchAgent] searching: {query[:80]}")
+        papers = await asyncio.to_thread(search_multi_query, query, 6)
+        sources = await asyncio.to_thread(format_for_synthesis, papers)
+        ctx.state["academic_sources"] = sources
+        ctx.sources.extend(sources)
+        ctx.source_urls.update(r.get("url", "") for r in sources if r.get("url"))
+        return ctx
+
+
+class ExtractAgent(Agent):
+    """Extracts content from a URL or uploaded file."""
+    def __init__(self, url: str = "", uploaded_file=None):
+        super().__init__("ExtractAgent")
+        self._url = url
+        self._file = uploaded_file
+
+    async def run(self, ctx: ResearchContext) -> ResearchContext:
+        extracted = []
+        if self._url and self._url.startswith("http"):
+            from tools.url_reader import read_url
+            print(f"[ExtractAgent] reading URL: {self._url[:80]}")
+            content = await asyncio.to_thread(read_url, self._url)
+            if "error" in content:
+                raise Exception(f"Could not read URL: {content['error']}")
+            extracted.append({
+                "title": content.get("title", self._url)[:80],
+                "url": self._url,
+                "content": content["content"][:4000]
+            })
+            ctx.state["extract_title"] = content.get("title", "")
+            ctx.state["search_query"] = content.get("title", "") or self._url
+
+        if self._file:
+            from tools.pdf_reader import read_pdf
+            file_name = (
+                getattr(self._file, "filename", None)
+                or getattr(self._file, "name", "document.pdf")
+            )
+            print(f"[ExtractAgent] reading PDF: {file_name}")
+            content = await asyncio.to_thread(read_pdf, self._file)
+            if "error" in content:
+                raise Exception(f"Could not read PDF: {content['error']}")
+            extracted.append({
+                "title": f"Uploaded PDF: {file_name}",
+                "url": "Uploaded document",
+                "content": content["content"][:4000]
+            })
+            if not ctx.state.get("search_query"):
+                ctx.state["search_query"] = content["content"][:200]
+                ctx.state["source_label"] = f"PDF: {file_name[:40]}"
+            else:
+                ctx.state["search_query"] = content.get("title", f"{file_name} {content['content'][:100]}")
+            ctx.state["source_label"] = ctx.state.get("source_label") or self._url[:60]
+            ctx.state["file_name"] = file_name
+
+        ctx.state["extracted"] = extracted
+        ctx.sources = extracted + ctx.sources  # primary source first
+        ctx.source_urls.update(r.get("url", "") for r in extracted if r.get("url"))
+        return ctx
+
+
+class DraftAgent(Agent):
+    """Synthesizes sources into a report using the LLM."""
+    def __init__(self, topic_label: str | None = None):
+        super().__init__("DraftAgent")
+        self._topic_label = topic_label
+
+    async def run(self, ctx: ResearchContext) -> ResearchContext:
+        topic = self._topic_label or ctx.query
+        print(f"[DraftAgent] synthesizing {len(ctx.sources)} sources")
+        raw = await asyncio.to_thread(
+            run_synthesis_agent, topic, ctx.sources, ctx.mode, ctx.tone
+        )
+        raw = validate_citations(raw, ctx.source_urls)
+        report, followups, contested = parse_followups(raw)
+        ctx.report = report
+        ctx.followups = followups
+        ctx.contested = contested
+        ctx.state["raw_report"] = raw
+        return ctx
+
+
+class ReviewAgent(Agent):
+    """Evaluates report quality and determines if re-search is needed."""
+    def __init__(self, min_words: int = 600):
+        super().__init__("ReviewAgent")
+        self._min_words = min_words
+
+    async def run(self, ctx: ResearchContext) -> ResearchContext:
+        word_count = len(ctx.report.split())
+        unclear_count = (
+            ctx.report.lower().count("unclear")
+            + ctx.report.lower().count("limited evidence")
+        )
+        needs_improvement = word_count < self._min_words or unclear_count > 3
+        ctx.state["word_count"] = word_count
+        ctx.state["unclear_count"] = unclear_count
+        ctx.state["needs_improvement"] = needs_improvement
+        if needs_improvement:
+            print(f"[ReviewAgent] thin ({word_count}w, {unclear_count} unclear)")
+        else:
+            print(f"[ReviewAgent] quality OK ({word_count}w)")
+        return ctx
+
+
+class ResearchAgent(Agent):
+    """Performs targeted follow-up searches for thin reports."""
+    def __init__(self):
+        super().__init__("ResearchAgent")
+
+    async def run(self, ctx: ResearchContext) -> ResearchContext:
+        if not ctx.state.get("needs_improvement"):
+            return ctx
+        if ctx.followups:
+            # Parallel search per follow-up question
+            print(f"[ResearchAgent] {len(ctx.followups)} follow-up queries in parallel")
+            tasks = [
+                asyncio.to_thread(run_search_agent, q, "quick")
+                for q in ctx.followups
+            ]
+            all_results = await asyncio.gather(*tasks)
+        else:
+            # Generic fallback search
+            print("[ResearchAgent] generic fallback search")
+            results = await asyncio.to_thread(
+                run_search_agent, f"{ctx.query} statistics data findings 2024 2025", "quick"
+            )
+            all_results = [results]
+
+        new_sources = []
+        for results in all_results:
+            for r in results:
+                if (
+                    "error" not in r
+                    and r.get("content", "").strip()
+                    and r.get("url", "") not in ctx.source_urls
+                ):
+                    new_sources.append(r)
+                    ctx.source_urls.add(r.get("url", ""))
+
+        ctx.state["new_sources"] = new_sources
+        if new_sources:
+            ctx.sources.extend(new_sources[:4])
+            print(f"[ResearchAgent] added {min(len(new_sources), 4)} new sources")
+        return ctx
+
+
+# ── Mode pipelines (agent DAGs) ────────────────────────────────────────────
+
+
+async def run_research(topic: str, depth: str = "normal", tone: str = "default") -> dict:
+    ctx = ResearchContext(query=topic, mode="topic", tone=tone)
+
+    # Stage 1: Parallel web + academic search
+    agents = [
+        SearchAgent(depth=depth),
+        AcademicSearchAgent(),
+    ]
+    await asyncio.gather(*[a.run(ctx) for a in agents])
+
+    clean = [r for r in ctx.sources if "error" not in r and r.get("content", "").strip()]
     if len(clean) < 2:
         raise Exception("Couldn't find enough reliable sources. Try a more specific term.")
+    ctx.sources = clean
 
-    # First pass — generate report
-    raw = run_synthesis_agent(topic, clean, mode="topic", tone=tone)
-    source_urls = {r.get("url", "") for r in clean if r.get("url")}
-    raw = validate_citations(raw, source_urls)
-    report, followups, contested = parse_followups(raw)
+    # Stage 2: Draft
+    await DraftAgent().run(ctx)
 
-    # Second pass — if report is thin, run targeted follow-up queries and regenerate
-    word_count = len(report.split())
-    unclear_count = report.lower().count("unclear") + report.lower().count("limited evidence")
-    if word_count < 600 or unclear_count > 3:
-        print(f"[Distill] Report thin ({word_count} words, {unclear_count} unclear) — running follow-up search")
-        deeper = run_search_agent(f"{topic} statistics data findings 2024 2025", depth="quick")
-        extra = [r for r in deeper if "error" not in r and r.get("content", "").strip() and r.get("url", "") not in source_urls]
-        if extra:
-            clean += extra[:4]
-            source_urls = {r.get("url", "") for r in clean if r.get("url")}
-            raw = run_synthesis_agent(topic, clean, mode="topic", tone=tone)
-            raw = validate_citations(raw, source_urls)
-            report, followups, contested = parse_followups(raw)
+    # Stage 3: Review + Research in parallel
+    await ReviewAgent().run(ctx)
+    await ResearchAgent().run(ctx)
+
+    # Stage 4: Re-draft if new sources were found
+    new_sources = ctx.state.get("new_sources", [])
+    if new_sources:
+        ctx.mode = "topic"
+        await DraftAgent().run(ctx)
 
     return {
         "topic": topic,
-        "sources_found": len(clean),
-        "report": report,
-        "followups": followups,
-        "contested": contested,
+        "sources_found": len(ctx.sources),
+        "report": ctx.report,
+        "followups": ctx.followups,
+        "contested": ctx.contested,
         "mode": "topic"
     }
 
 
-def run_url_research(url: str, tone: str = "default") -> dict:
-    from tools.url_reader import read_url
-    print(f"[Distill] Reading URL: {url}")
-    url_content = read_url(url)
-    if "error" in url_content:
-        raise Exception(f"Could not read URL: {url_content['error']}")
+async def run_url_research(url: str, tone: str = "default") -> dict:
+    ctx = ResearchContext(query=f"Article Analysis: {url}", mode="url", tone=tone)
 
-    # Fetch supporting web sources for cross-reference
-    topic_for_search = url_content.get("title", "") or url
-    supporting = run_search_agent(topic_for_search[:200], depth="quick")
-    clean_supporting = [
-        r for r in supporting
+    # Stage 1: Parallel extract + search
+    extract = ExtractAgent(url=url)
+    search = SearchAgent(query=url, depth="quick")
+    await asyncio.gather(extract.run(ctx), search.run(ctx))
+
+    combined = ctx.state.get("extracted", []) + [
+        r for r in ctx.sources
         if "error" not in r and r.get("content", "").strip()
-    ]
+    ][:6]
+    ctx.sources = combined
+    ctx.source_urls = {r.get("url", "") for r in combined if r.get("url")}
 
-    combined = [{
-        "title": url_content.get("title", url)[:80],
-        "url": url,
-        "content": url_content["content"][:4000]
-    }] + clean_supporting[:6]
+    # Stage 2: Draft
+    await DraftAgent(topic_label=f"Article Analysis: {url}").run(ctx)
 
-    total = len(combined)
-    raw = run_synthesis_agent(f"Article Analysis: {url}", combined, mode="url", tone=tone)
-    source_urls = {r.get("url", "") for r in combined if r.get("url")}
-    raw = validate_citations(raw, source_urls)
-    report, followups, contested = parse_followups(raw)
     return {
         "topic": f"URL: {url[:60]}",
-        "sources_found": total,
-        "report": report,
-        "followups": followups,
-        "contested": contested,
+        "sources_found": len(ctx.sources),
+        "report": ctx.report,
+        "followups": ctx.followups,
+        "contested": ctx.contested,
         "mode": "url"
     }
 
 
-def run_pdf_research(uploaded_file, tone: str = "default") -> dict:
-    from tools.pdf_reader import read_pdf
+async def run_pdf_research(uploaded_file, tone: str = "default") -> dict:
     file_name = (
         getattr(uploaded_file, "filename", None)
         or getattr(uploaded_file, "name", "document.pdf")
     )
-    print(f"[Distill] Reading PDF: {file_name}")
-    pdf_content = read_pdf(uploaded_file)
-    if "error" in pdf_content:
-        raise Exception(f"Could not read PDF: {pdf_content['error']}")
+    ctx = ResearchContext(query=f"Analysis of: {file_name}", mode="pdf", tone=tone)
 
-    # Fetch supporting web sources for context
-    supporting = run_search_agent(pdf_content["content"][:200], depth="quick")
-    clean_supporting = [
-        r for r in supporting
+    # Stage 1a: Extract PDF content (search query depends on it)
+    extract = ExtractAgent(uploaded_file=uploaded_file)
+    await extract.run(ctx)
+    extracted = ctx.state.get("extracted", [])
+
+    # Stage 1b: Supporting search (now we know the content)
+    search_query = ctx.state.get("search_query", file_name)
+    search = SearchAgent(query=search_query[:200], depth="quick")
+    await search.run(ctx)
+
+    supporting = [
+        r for r in ctx.sources if r.get("url") != "Uploaded document"
         if "error" not in r and r.get("content", "").strip()
-    ]
+    ][:6]
+    ctx.sources = extracted + supporting
+    ctx.source_urls = {r.get("url", "") for r in ctx.sources if r.get("url")}
 
-    combined = [{
-        "title": f"Uploaded PDF: {file_name}",
-        "url": "Uploaded document",
-        "content": pdf_content["content"][:4000]
-    }] + clean_supporting[:6]
+    # Stage 2: Draft
+    await DraftAgent().run(ctx)
 
-    total = len(combined)
-    raw = run_synthesis_agent(f"Analysis of: {file_name}", combined, mode="pdf", tone=tone)
-    source_urls = {r.get("url", "") for r in combined if r.get("url")}
-    raw = validate_citations(raw, source_urls)
-    report, followups, contested = parse_followups(raw)
     return {
         "topic": f"PDF: {file_name[:40]}",
-        "sources_found": total,
-        "report": report,
-        "followups": followups,
-        "contested": contested,
+        "sources_found": len(ctx.sources),
+        "report": ctx.report,
+        "followups": ctx.followups,
+        "contested": ctx.contested,
         "mode": "pdf"
     }
 
 
-def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dict:
-    combined = []
-    source_label = ""
-    search_query = ""
+async def run_analyze(tone: str = "default", url: str = "", uploaded_file=None) -> dict:
+    ctx = ResearchContext(query="", mode="url", tone=tone)
 
-    if url and url.startswith("http"):
-        from tools.url_reader import read_url
-        print(f"[Distill] Reading URL: {url}")
-        content = read_url(url)
-        if "error" in content:
-            raise Exception(f"Could not read URL: {content['error']}")
-        combined.append({"title": content.get("title", url)[:80], "url": url, "content": content["content"][:4000]})
-        source_label = url[:60]
-        search_query = content.get("title", "") or url
-
-    if uploaded_file:
-        from tools.pdf_reader import read_pdf
-        file_name = getattr(uploaded_file, "filename", None) or getattr(uploaded_file, "name", "document.pdf")
-        print(f"[Distill] Reading PDF: {file_name}")
-        content = read_pdf(uploaded_file)
-        if "error" in content:
-            raise Exception(f"Could not read PDF: {content['error']}")
-        combined.append({"title": f"Uploaded PDF: {file_name}", "url": "Uploaded document", "content": content["content"][:4000]})
-        if not source_label:
-            source_label = f"PDF: {file_name[:40]}"
-            search_query = content["content"][:200]
-        else:
-            search_query = content.get("title", f"{file_name} {content['content'][:100]}")
-
-    if not combined:
+    if not url and not uploaded_file:
         raise Exception("Provide a URL or upload a file to analyze.")
 
-    # Fetch supporting web sources for cross-reference
-    if search_query:
-        supporting = run_search_agent(search_query[:200], depth="quick")
-        clean_supporting = [
-            r for r in supporting
-            if "error" not in r and r.get("content", "").strip()
-        ]
-        combined += clean_supporting[:6]
+    # Stage 1: Parallel extraction + supporting search
+    extract = ExtractAgent(url=url, uploaded_file=uploaded_file)
+    search_query = url if url else "Uploaded document"
+    web_search = SearchAgent(query=search_query[:200], depth="quick")
+    await asyncio.gather(extract.run(ctx), web_search.run(ctx))
 
-    label = f"Analysis: {source_label}"
-    raw = run_synthesis_agent(label, combined, mode="url", tone=tone)
-    source_urls = {r.get("url", "") for r in combined if r.get("url")}
-    raw = validate_citations(raw, source_urls)
-    report, followups, contested = parse_followups(raw)
+    extracted = ctx.state.get("extracted", [])
+    supporting = [
+        r for r in ctx.sources
+        if "error" not in r and r.get("content", "").strip()
+        and r.get("url", "") not in {e.get("url", "") for e in extracted}
+    ][:6]
+    ctx.sources = extracted + supporting
+    ctx.source_urls = {r.get("url", "") for r in ctx.sources if r.get("url")}
+
+    label = f"Analysis: {url[:60] if url else ctx.state.get('file_name', 'document')[:40]}"
+
+    # Stage 2: Draft
+    await DraftAgent(topic_label=label).run(ctx)
+
     return {
         "topic": label,
-        "sources_found": len(combined),
-        "report": report,
-        "followups": followups,
-        "contested": contested,
+        "sources_found": len(ctx.sources),
+        "report": ctx.report,
+        "followups": ctx.followups,
+        "contested": ctx.contested,
         "mode": "analyze"
     }
 
 
-def run_comparison_research(topic_a: str, topic_b: str, depth: str = "normal") -> dict:
-    print(f"[Distill] Comparing: {topic_a} vs {topic_b}")
-    results_a = run_search_agent(topic_a, depth=depth)
-    results_b = run_search_agent(topic_b, depth=depth)
-    clean_a = [r for r in results_a if "error" not in r and r.get("content", "").strip()]
-    clean_b = [r for r in results_b if "error" not in r and r.get("content", "").strip()]
+async def run_comparison_research(topic_a: str, topic_b: str, depth: str = "normal") -> dict:
+    ctx = ResearchContext(query=f"{topic_a} vs {topic_b}", mode="comparison")
+
+    # Stage 1: Parallel search for both topics
+    search_a = SearchAgent(query=topic_a, depth=depth)
+    search_b = SearchAgent(query=topic_b, depth=depth)
+    await asyncio.gather(search_a.run(ctx), search_b.run(ctx))
+
+    # Separate results by topic
+    all_results = ctx.state.get("search_results", [])
+    # Since both searches wrote to ctx.sources, we need to distinguish them
+    # We'll re-run with separate contexts to keep sources clean
+    ctx_a = ResearchContext(query=topic_a)
+    ctx_b = ResearchContext(query=topic_b)
+    await asyncio.gather(
+        SearchAgent(query=topic_a, depth=depth).run(ctx_a),
+        SearchAgent(query=topic_b, depth=depth).run(ctx_b),
+    )
+
+    clean_a = [r for r in ctx_a.sources if "error" not in r and r.get("content", "").strip()]
+    clean_b = [r for r in ctx_b.sources if "error" not in r and r.get("content", "").strip()]
     if len(clean_a) < 1 or len(clean_b) < 1:
         raise Exception("Couldn't find enough sources for one or both topics.")
+
     for r in clean_a:
         r["title"] = f"[{topic_a}] {r.get('title', '')}"
     for r in clean_b:
         r["title"] = f"[{topic_b}] {r.get('title', '')}"
-    combined = clean_a + clean_b
-    raw = run_synthesis_agent(f"{topic_a} vs {topic_b}", combined, mode="comparison")
-    source_urls = {r.get("url", "") for r in combined if r.get("url")}
-    raw = validate_citations(raw, source_urls)
-    report, followups, contested = parse_followups(raw)
+
+    ctx.sources = clean_a + clean_b
+    ctx.source_urls = {r.get("url", "") for r in ctx.sources if r.get("url")}
+
+    # Stage 2: Draft
+    await DraftAgent().run(ctx)
+
     return {
         "topic": f"{topic_a} vs {topic_b}",
-        "sources_found": len(combined),
-        "report": report,
-        "followups": followups,
-        "contested": contested,
+        "sources_found": len(ctx.sources),
+        "report": ctx.report,
+        "followups": ctx.followups,
+        "contested": ctx.contested,
         "mode": "comparison"
     }
 
 
-def run_write_paper(topic: str, depth: str = "normal") -> dict:
-    """
-    Write a full IEEE research paper.
-    Uses Semantic Scholar for real academic citations + Tavily for current web context.
-    """
+async def run_write_paper(topic: str, depth: str = "normal") -> dict:
     from tools.semantic_scholar import search_multi_query, format_for_synthesis
 
+    ctx = ResearchContext(query=topic, mode="write_paper", tone="academic")
     print(f"[Distill] Writing IEEE paper on: {topic}")
 
-    # Step 1 — Fetch real academic papers from Semantic Scholar
-    print("[Distill] Querying Semantic Scholar for academic sources...")
-    academic_papers = search_multi_query(topic, limit_per_query=6)
-    academic_sources = format_for_synthesis(academic_papers)
-    print(f"[Distill] Found {len(academic_sources)} academic papers")
+    # Stage 1: Parallel academic + web search
+    async def _academic():
+        print("[Distill] Querying Semantic Scholar for academic sources...")
+        papers = await asyncio.to_thread(search_multi_query, topic, 6)
+        sources = await asyncio.to_thread(format_for_synthesis, papers)
+        ctx.state["academic_sources"] = sources
+        print(f"[Distill] Found {len(sources)} academic papers")
+        return sources
 
-    # Step 2 — Fetch current web context from Tavily
-    print("[Distill] Fetching current web context...")
-    web_results = run_search_agent(topic, depth="normal")
-    web_clean = [
-        r for r in web_results
-        if "error" not in r and r.get("content", "").strip()
-    ]
+    async def _web():
+        print("[Distill] Fetching current web context...")
+        results = await asyncio.to_thread(run_search_agent, topic, "normal")
+        return [r for r in results if "error" not in r and r.get("content", "").strip()]
 
-    # Also search for related academic angle
-    web_extra = run_search_agent(f"{topic} research findings 2023 2024", depth="quick")
-    web_extra_clean = [
-        r for r in web_extra
-        if "error" not in r and r.get("content", "").strip()
-    ]
+    async def _web_extra():
+        results = await asyncio.to_thread(
+            run_search_agent, f"{topic} research findings 2023 2024", "quick"
+        )
+        return [r for r in results if "error" not in r and r.get("content", "").strip()]
 
-    # Step 3 — Combine: academic papers first (higher quality), web context second
-    # Academic papers get priority in ordering — model sees them first
+    academic_sources, web_clean, web_extra_clean = await asyncio.gather(
+        _academic(), _web(), _web_extra()
+    )
+
     combined = academic_sources + web_clean + web_extra_clean
 
     # Deduplicate by URL
@@ -290,20 +460,20 @@ def run_write_paper(topic: str, depth: str = "normal") -> dict:
             "Try a more specific topic."
         )
 
-    print(f"[Distill] Total sources for paper: {len(deduped)} "
+    ctx.sources = deduped[:15]
+    ctx.source_urls = {r.get("url", "") for r in ctx.sources if r.get("url")}
+
+    print(f"[Distill] Total sources for paper: {len(ctx.sources)} "
           f"({len(academic_sources)} academic, {len(web_clean + web_extra_clean)} web)")
 
-    # Step 4 — Generate paper with academic-focused synthesis
-    raw = run_synthesis_agent(
-        topic,
-        deduped[:15],  # cap at 15 sources for quality
-        mode="write_paper",
-        tone="academic"
+    # Stage 2: Draft
+    raw = await asyncio.to_thread(
+        run_synthesis_agent, topic, ctx.sources, "write_paper", "academic"
     )
 
     return {
         "topic": topic,
-        "sources_found": len(deduped),
+        "sources_found": len(ctx.sources),
         "academic_sources": len(academic_sources),
         "report": raw,
         "followups": [],
@@ -312,10 +482,10 @@ def run_write_paper(topic: str, depth: str = "normal") -> dict:
     }
 
 
-def run_improve_paper(uploaded_file) -> dict:
-    """Read uploaded paper and provide specific improvements with current sources."""
+async def run_improve_paper(uploaded_file) -> dict:
     from tools.pdf_reader import read_pdf
     from tools.semantic_scholar import search_papers, format_for_synthesis
+    from agents.synthesis_agent import run_synthesis_agent
 
     file_name = (
         getattr(uploaded_file, "filename", None)
@@ -323,36 +493,37 @@ def run_improve_paper(uploaded_file) -> dict:
     )
     print(f"[Distill] Improving paper: {file_name}")
 
-    pdf_content = read_pdf(uploaded_file)
+    pdf_content = await asyncio.to_thread(read_pdf, uploaded_file)
     if "error" in pdf_content:
         raise Exception(f"Could not read PDF: {pdf_content['error']}")
 
     paper_text = pdf_content["content"]
-
-    # Extract topic from beginning of paper for targeted searches
     search_query = paper_text[:400].replace('\n', ' ').strip()
 
-    # Get academic sources related to the paper's topic
-    print("[Distill] Finding related academic sources...")
-    academic_papers = search_papers(search_query, limit=8, min_citations=0)
-    academic_sources = format_for_synthesis(academic_papers)
+    # Stage 1: Parallel academic + web search
+    async def _academic():
+        print("[Distill] Finding related academic sources...")
+        papers = await asyncio.to_thread(search_papers, search_query, 8, 0)
+        return await asyncio.to_thread(format_for_synthesis, papers)
 
-    # Also get current web sources
-    web_results = run_search_agent(search_query[:200], depth="normal")
-    web_clean = [r for r in web_results if "error" not in r and r.get("content", "").strip()]
+    async def _web():
+        results = await asyncio.to_thread(run_search_agent, search_query[:200], "normal")
+        return [r for r in results if "error" not in r and r.get("content", "").strip()]
 
-    # Paper being reviewed goes first so agent reads it fully
+    academic_sources, web_clean = await asyncio.gather(_academic(), _web())
+
     combined = [{
         "title": f"PAPER BEING REVIEWED: {file_name}",
         "url": "Uploaded paper",
         "content": paper_text[:3500]
     }] + academic_sources[:6] + web_clean[:4]
 
-    raw = run_synthesis_agent(
+    raw = await asyncio.to_thread(
+        run_synthesis_agent,
         f"Review and improve: {file_name}",
         combined,
-        mode="improve_paper",
-        tone="academic"
+        "improve_paper",
+        "academic"
     )
 
     return {
@@ -363,3 +534,34 @@ def run_improve_paper(uploaded_file) -> dict:
         "contested": "",
         "mode": "improve_paper"
     }
+
+
+# ── Legacy sync wrappers (used by tests) ───────────────────────────────────
+
+
+def run_research_sync(topic: str, depth: str = "normal", tone: str = "default") -> dict:
+    return asyncio.run(run_research(topic, depth, tone))
+
+
+def run_url_research_sync(url: str, tone: str = "default") -> dict:
+    return asyncio.run(run_url_research(url, tone))
+
+
+def run_pdf_research_sync(uploaded_file, tone: str = "default") -> dict:
+    return asyncio.run(run_pdf_research(uploaded_file, tone))
+
+
+def run_comparison_research_sync(topic_a: str, topic_b: str, depth: str = "normal") -> dict:
+    return asyncio.run(run_comparison_research(topic_a, topic_b, depth))
+
+
+def run_write_paper_sync(topic: str, depth: str = "normal") -> dict:
+    return asyncio.run(run_write_paper(topic, depth))
+
+
+def run_improve_paper_sync(uploaded_file) -> dict:
+    return asyncio.run(run_improve_paper(uploaded_file))
+
+
+def run_analyze_sync(tone: str = "default", url: str = "", uploaded_file=None) -> dict:
+    return asyncio.run(run_analyze(tone, url, uploaded_file))

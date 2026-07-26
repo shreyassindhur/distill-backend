@@ -106,25 +106,25 @@ def root():
 # ── research endpoints ────────────────────────────────────────────────────────
 
 @app.post("/research/topic")
-def research_topic(req: TopicRequest):
+async def research_topic(req: TopicRequest):
     try:
-        return JSONResponse(content=run_research(req.topic, depth=req.depth, tone=req.tone))
+        return JSONResponse(content=await run_research(req.topic, depth=req.depth, tone=req.tone))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.post("/research/url")
-def research_url(req: URLRequest):
+async def research_url(req: URLRequest):
     try:
-        return JSONResponse(content=run_url_research(req.url, tone=req.tone))
+        return JSONResponse(content=await run_url_research(req.url, tone=req.tone))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.post("/research/compare")
-def research_compare(req: CompareRequest):
+async def research_compare(req: CompareRequest):
     try:
-        return JSONResponse(content=run_comparison_research(req.topic_a, req.topic_b, depth=req.depth))
+        return JSONResponse(content=await run_comparison_research(req.topic_a, req.topic_b, depth=req.depth))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -136,7 +136,7 @@ async def research_pdf(
 ):
     try:
         await file.seek(0)
-        return JSONResponse(content=run_pdf_research(file, tone=tone))
+        return JSONResponse(content=await run_pdf_research(file, tone=tone))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -150,7 +150,7 @@ async def research_analyze(
     try:
         if file:
             await file.seek(0)
-        return JSONResponse(content=run_analyze(tone=tone, url=url, uploaded_file=file))
+        return JSONResponse(content=await run_analyze(tone=tone, url=url, uploaded_file=file))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -158,9 +158,9 @@ async def research_analyze(
 # ── paper endpoints ───────────────────────────────────────────────────────────
 
 @app.post("/paper/write")
-def paper_write(req: WritePaperRequest):
+async def paper_write(req: WritePaperRequest):
     try:
-        return JSONResponse(content=run_write_paper(req.topic, depth=req.depth))
+        return JSONResponse(content=await run_write_paper(req.topic, depth=req.depth))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -169,7 +169,7 @@ def paper_write(req: WritePaperRequest):
 async def paper_improve(file: UploadFile = File(...)):
     try:
         await file.seek(0)
-        return JSONResponse(content=run_improve_paper(file))
+        return JSONResponse(content=await run_improve_paper(file))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
